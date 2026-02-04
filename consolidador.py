@@ -569,24 +569,23 @@ class ConsolidadorApp:
                     else:
                         raise
 
-            # Convertir a PDF final si se solicitó
+            # Convertir a PDF final si se solicitó (misma lógica: PDF se une, Word se convierte a PDF y se une)
             ruta_pdf_final = None
             if self.guardar_pdf_final.get():
-                if not DOCX2PDF_AVAILABLE:
+                try:
+                    base, _ = os.path.splitext(ruta_salida)
+                    ruta_pdf_final = f"{base}.pdf"
+
+                    pdfs_a_unir = self._preparar_pdfs_para_union(temp_files)
+                    if not pdfs_a_unir:
+                        raise Exception("No hay PDFs válidos para unir.")
+
+                    self._unir_pdfs(pdfs_a_unir, ruta_pdf_final)
+                except Exception as e:
                     messagebox.showwarning(
-                        "PDF no disponible",
-                        "docx2pdf no está instalado. No se generará PDF final."
+                        "Error al generar PDF",
+                        f"El DOCX se guardó, pero falló la consolidación a PDF:\n{str(e)}"
                     )
-                else:
-                    try:
-                        base, _ = os.path.splitext(ruta_salida)
-                        ruta_pdf_final = f"{base}.pdf"
-                        docx_to_pdf(ruta_salida, ruta_pdf_final)
-                    except Exception as e:
-                        messagebox.showwarning(
-                            "Error al generar PDF",
-                            f"El DOCX se guardó, pero falló la conversión a PDF:\n{str(e)}"
-                        )
             
             self.progress.stop()
             estado_texto = f"Estado: ✅ Consolidación completada: {nombre_salida}"
@@ -641,76 +640,14 @@ class ConsolidadorApp:
             self.label_estado.config(text="Estado: Iniciando consolidación a PDF...", foreground="blue")
             self.root.update()
 
-            pdfs_a_unir = []
-
-            for idx, ruta_archivo in enumerate(self.archivos_seleccionados, 1):
-                nombre_archivo = os.path.basename(ruta_archivo)
-                try:
-                    self.label_estado.config(
-                        text=f"Estado: Preparando {idx}/{len(self.archivos_seleccionados)}: {nombre_archivo}",
-                        foreground="blue"
-                    )
-                    self.root.update()
-
-                    if not os.path.exists(ruta_archivo):
-                        raise FileNotFoundError(f"El archivo no existe: {ruta_archivo}")
-
-                    if ruta_archivo.lower().endswith('.pdf'):
-                        pdfs_a_unir.append(ruta_archivo)
-                    elif ruta_archivo.lower().endswith(('.docx', '.doc')):
-                        if not DOCX2PDF_AVAILABLE:
-                            raise Exception("docx2pdf no está instalado. Instálalo para convertir Word a PDF.")
-
-                        pdf_temporal = os.path.join(
-                            self.carpeta_entrada,
-                            f"temp_conv_{id(ruta_archivo)}.pdf"
-                        )
-                        temp_files.append(pdf_temporal)
-                        try:
-                            docx_to_pdf(ruta_archivo, pdf_temporal)
-                        except Exception as e:
-                            raise Exception(f"Error al convertir Word a PDF: {str(e)}")
-
-                        pdfs_a_unir.append(pdf_temporal)
-                    else:
-                        raise Exception("Formato no soportado para PDF. Usa PDF o Word.")
-
-                except Exception as e:
-                    error_msg = f"Error preparando {nombre_archivo}"
-                    print(f"ERROR DETALLADO: {error_msg}\n{traceback.format_exc()}")
-                    self._agregar_error_documento_pdf(nombre_archivo, str(e))
-                    continue
-
+            pdfs_a_unir = self._preparar_pdfs_para_union(temp_files)
             if not pdfs_a_unir:
                 raise Exception("No hay PDFs válidos para unir.")
 
             ruta_salida = os.path.join(self.carpeta_entrada, nombre_salida)
 
             # Unir PDFs directamente
-            pdf_salida = fitz.open()
-            try:
-                for idx, pdf_path in enumerate(pdfs_a_unir, 1):
-                    self.label_estado.config(
-                        text=f"Estado: Uniendo {idx}/{len(pdfs_a_unir)}: {os.path.basename(pdf_path)}",
-                        foreground="blue"
-                    )
-                    self.root.update()
-
-                    last_rect = None
-                    with fitz.open(pdf_path) as src:
-                        if src.page_count > 0:
-                            last_rect = src[-1].rect
-                        pdf_salida.insert_pdf(src)
-
-                    if idx < len(pdfs_a_unir) and self.agregar_pagina_blanca.get():
-                        if last_rect:
-                            pdf_salida.new_page(width=last_rect.width, height=last_rect.height)
-                        else:
-                            pdf_salida.new_page()
-
-                pdf_salida.save(ruta_salida)
-            finally:
-                pdf_salida.close()
+            self._unir_pdfs(pdfs_a_unir, ruta_salida)
 
             self.progress.stop()
             self.label_estado.config(
@@ -856,6 +793,77 @@ class ConsolidadorApp:
             self.root.update()
         except:
             pass
+
+    def _preparar_pdfs_para_union(self, temp_files):
+        """Convierte Word a PDF cuando sea necesario y devuelve la lista de PDFs a unir."""
+        pdfs_a_unir = []
+
+        for idx, ruta_archivo in enumerate(self.archivos_seleccionados, 1):
+            nombre_archivo = os.path.basename(ruta_archivo)
+            try:
+                self.label_estado.config(
+                    text=f"Estado: Preparando {idx}/{len(self.archivos_seleccionados)}: {nombre_archivo}",
+                    foreground="blue"
+                )
+                self.root.update()
+
+                if not os.path.exists(ruta_archivo):
+                    raise FileNotFoundError(f"El archivo no existe: {ruta_archivo}")
+
+                if ruta_archivo.lower().endswith('.pdf'):
+                    pdfs_a_unir.append(ruta_archivo)
+                elif ruta_archivo.lower().endswith(('.docx', '.doc')):
+                    if not DOCX2PDF_AVAILABLE:
+                        raise Exception("docx2pdf no está instalado. Instálalo para convertir Word a PDF.")
+
+                    pdf_temporal = os.path.join(
+                        self.carpeta_entrada,
+                        f"temp_conv_{id(ruta_archivo)}.pdf"
+                    )
+                    temp_files.append(pdf_temporal)
+                    try:
+                        docx_to_pdf(ruta_archivo, pdf_temporal)
+                    except Exception as e:
+                        raise Exception(f"Error al convertir Word a PDF: {str(e)}")
+
+                    pdfs_a_unir.append(pdf_temporal)
+                else:
+                    raise Exception("Formato no soportado para PDF. Usa PDF o Word.")
+
+            except Exception as e:
+                error_msg = f"Error preparando {nombre_archivo}"
+                print(f"ERROR DETALLADO: {error_msg}\n{traceback.format_exc()}")
+                self._agregar_error_documento_pdf(nombre_archivo, str(e))
+                continue
+
+        return pdfs_a_unir
+
+    def _unir_pdfs(self, pdfs_a_unir, ruta_salida):
+        """Une una lista de PDFs en un solo archivo."""
+        pdf_salida = fitz.open()
+        try:
+            for idx, pdf_path in enumerate(pdfs_a_unir, 1):
+                self.label_estado.config(
+                    text=f"Estado: Uniendo {idx}/{len(pdfs_a_unir)}: {os.path.basename(pdf_path)}",
+                    foreground="blue"
+                )
+                self.root.update()
+
+                last_rect = None
+                with fitz.open(pdf_path) as src:
+                    if src.page_count > 0:
+                        last_rect = src[-1].rect
+                    pdf_salida.insert_pdf(src)
+
+                if idx < len(pdfs_a_unir) and self.agregar_pagina_blanca.get():
+                    if last_rect:
+                        pdf_salida.new_page(width=last_rect.width, height=last_rect.height)
+                    else:
+                        pdf_salida.new_page()
+
+            pdf_salida.save(ruta_salida)
+        finally:
+            pdf_salida.close()
 
 
 def main():
