@@ -38,15 +38,15 @@ class ConsolidadorApp:
         self.carpeta_entrada = None
         self.agregar_pagina_blanca = tk.BooleanVar(value=False)
         self.normalizar_a_pdf = tk.BooleanVar(value=False)
-        self.guardar_pdf_final = tk.BooleanVar(value=False)
+        self.formato_salida = tk.StringVar(value="DOCX")
         
         # Frame principal
         main_frame = ttk.Frame(root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Título
-        titulo = ttk.Label(main_frame, text="Consolidador de Documentos PDF y WORD",
-                          font=("Arial", 14, "bold"))
+        titulo = ttk.Label(main_frame, text="Consolidador de Documentos (Word y PDF)",
+                  font=("Arial", 14, "bold"))
         titulo.grid(row=0, column=0, columnspan=3, pady=10)
         
         # Instrucciones
@@ -116,11 +116,11 @@ class ConsolidadorApp:
         salida_frame = ttk.Frame(main_frame)
         salida_frame.grid(row=5, column=0, columnspan=3, pady=(15, 5), sticky=(tk.W, tk.E))
         
-        ttk.Label(salida_frame, text="Nombre archivo:", 
+        ttk.Label(salida_frame, text="Nombre base:", 
                  font=("Arial", 10)).pack(side=tk.LEFT, padx=5)
         
         self.entry_nombre = ttk.Entry(salida_frame, width=35, font=("Arial", 10))
-        self.entry_nombre.insert(0, "consolidado.docx")
+        self.entry_nombre.insert(0, "consolidado")
         self.entry_nombre.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
         # Checkbox para páginas en blanco
@@ -153,22 +153,28 @@ class ConsolidadorApp:
         if not DOCX2PDF_AVAILABLE:
             ttk.Label(checkbox_pdf_frame, text="⚠️ Instala docx2pdf", foreground="orange", font=("Arial", 8)).pack(side=tk.LEFT, padx=5)
 
-        # Checkbox para guardar producto final en PDF
-        checkbox_pdf_final = ttk.Frame(main_frame)
-        checkbox_pdf_final.grid(row=8, column=0, columnspan=3, pady=(5, 5), sticky=(tk.W))
+        # Selector de formato de salida
+        formato_frame = ttk.Frame(main_frame)
+        formato_frame.grid(row=8, column=0, columnspan=3, pady=(5, 5), sticky=(tk.W))
 
-        self.check_guardar_pdf = ttk.Checkbutton(
-            checkbox_pdf_final,
-            text="💾 Guardar producto final en PDF",
-            variable=self.guardar_pdf_final,
-            onvalue=True,
-            offvalue=False,
-            state='normal' if DOCX2PDF_AVAILABLE else 'disabled'
+        ttk.Label(formato_frame, text="Formato de salida:", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=5)
+        self.combo_formato = ttk.Combobox(
+            formato_frame,
+            textvariable=self.formato_salida,
+            values=["DOCX", "PDF", "DOCX+PDF"],
+            state="readonly",
+            width=12
         )
-        self.check_guardar_pdf.pack(side=tk.LEFT, padx=5)
-        
+        self.combo_formato.pack(side=tk.LEFT, padx=5)
+        self.combo_formato.current(0)
+
         if not DOCX2PDF_AVAILABLE:
-            ttk.Label(checkbox_pdf_final, text="⚠️ Instala docx2pdf", foreground="orange", font=("Arial", 8)).pack(side=tk.LEFT, padx=5)
+            ttk.Label(
+                formato_frame,
+                text="⚠️ PDF requiere docx2pdf",
+                foreground="orange",
+                font=("Arial", 8)
+            ).pack(side=tk.LEFT, padx=5)
         
         # Ruta de guardado
         ruta_frame = ttk.Frame(main_frame)
@@ -188,8 +194,8 @@ class ConsolidadorApp:
                            command=self.procesar_documentos)
         self.btn_procesar.grid(row=10, column=0, columnspan=3, pady=8, sticky=(tk.W, tk.E))
 
-        # Botón solo convertir a PDF
-        self.btn_solo_pdf = ttk.Button(main_frame, text="📄 SOLO CONVERTIR A PDF",
+        # Botón consolidar a PDF
+        self.btn_solo_pdf = ttk.Button(main_frame, text="📄 CONSOLIDAR A PDF",
                            command=self.procesar_solo_pdf)
         self.btn_solo_pdf.grid(row=11, column=0, columnspan=3, pady=8, sticky=(tk.W, tk.E))
         
@@ -408,11 +414,22 @@ class ConsolidadorApp:
                                   "Arrastra archivos a la lista o usa los botones para agregar.")
             return
         
-        nombre_salida = self.entry_nombre.get().strip()
-        if not nombre_salida:
-            nombre_salida = "consolidado.docx"
-        if not nombre_salida.endswith('.docx'):
-            nombre_salida += '.docx'
+        nombre_base = self.entry_nombre.get().strip()
+        if not nombre_base:
+            nombre_base = "consolidado"
+
+        formato = self.formato_salida.get()
+        if formato == "PDF":
+            self._procesar_como_pdf(nombre_base)
+            return
+        if formato == "DOCX+PDF" and not DOCX2PDF_AVAILABLE:
+            messagebox.showwarning(
+                "PDF no disponible",
+                "docx2pdf no está instalado. Selecciona DOCX o instala docx2pdf."
+            )
+            return
+
+        nombre_salida = f"{nombre_base}.docx"
         
         # Determinar carpeta de salida (usar la del primer archivo si no está definida)
         if not self.carpeta_entrada and self.archivos_seleccionados:
@@ -436,7 +453,7 @@ class ConsolidadorApp:
         
         # Ejecutar en thread separado para no bloquear UI
         thread = threading.Thread(target=self._procesar_en_background,
-                                 args=(nombre_salida,))
+                     args=(nombre_salida, formato))
         thread.daemon = True
         thread.start()
 
@@ -450,12 +467,12 @@ class ConsolidadorApp:
             )
             return
 
-        nombre_salida = self.entry_nombre.get().strip()
-        if not nombre_salida:
-            nombre_salida = "consolidado.pdf"
-        base, ext = os.path.splitext(nombre_salida)
-        if ext.lower() != '.pdf':
-            nombre_salida = f"{base}.pdf"
+        nombre_base = self.entry_nombre.get().strip()
+        if not nombre_base:
+            nombre_base = "consolidado"
+
+        self._procesar_como_pdf(nombre_base)
+        return
 
         # Determinar carpeta de salida (usar la del primer archivo si no está definida)
         if not self.carpeta_entrada and self.archivos_seleccionados:
@@ -473,6 +490,33 @@ class ConsolidadorApp:
             )
             return
 
+    def _procesar_como_pdf(self, nombre_base):
+        """Valida ruta de salida y lanza el consolidado a PDF"""
+        if not DOCX2PDF_AVAILABLE:
+            messagebox.showwarning(
+                "PDF no disponible",
+                "docx2pdf no está instalado. Instálalo para convertir Word a PDF."
+            )
+            return
+
+        # Determinar carpeta de salida (usar la del primer archivo si no está definida)
+        if not self.carpeta_entrada and self.archivos_seleccionados:
+            self.carpeta_entrada = os.path.dirname(self.archivos_seleccionados[0])
+            self.entry_ruta.config(state='normal')
+            self.entry_ruta.delete(0, tk.END)
+            self.entry_ruta.insert(0, self.carpeta_entrada)
+            self.entry_ruta.config(state='readonly')
+
+        # Verificar que hay una ruta de salida válida
+        if not self.carpeta_entrada or not os.path.exists(self.carpeta_entrada):
+            messagebox.showwarning(
+                "Advertencia",
+                "Por favor selecciona una carpeta válida para guardar el consolidado."
+            )
+            return
+
+        nombre_salida = f"{nombre_base}.pdf"
+
         # Deshabilitar botones durante procesamiento
         self.btn_procesar.config(state='disabled')
         self.btn_agregar.config(state='disabled')
@@ -487,7 +531,7 @@ class ConsolidadorApp:
         thread.daemon = True
         thread.start()
     
-    def _procesar_en_background(self, nombre_salida):
+    def _procesar_en_background(self, nombre_salida, formato_salida):
         """Procesa documentos en background con máxima robustez - Solo consolida contenido"""
         temp_files = []
         try:
@@ -571,7 +615,7 @@ class ConsolidadorApp:
 
             # Convertir a PDF final si se solicitó (misma lógica: PDF se une, Word se convierte a PDF y se une)
             ruta_pdf_final = None
-            if self.guardar_pdf_final.get():
+            if formato_salida == "DOCX+PDF":
                 try:
                     base, _ = os.path.splitext(ruta_salida)
                     ruta_pdf_final = f"{base}.pdf"
