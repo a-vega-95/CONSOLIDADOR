@@ -1,3 +1,11 @@
+from ui import run_app
+
+
+if __name__ == "__main__":
+    run_app()
+    raise SystemExit()
+
+"""
 import os
 import re
 import tkinter as tk
@@ -928,3 +936,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+"""
